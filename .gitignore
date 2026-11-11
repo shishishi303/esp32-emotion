@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# 数据集：体积大 + 版权问题，绝不公开
+data/
+train/
+test/
+val/
+
+# 训练中间产物
+outputs/
+checkpoints/
+logs/
+*.keras
+*.h5
+*.hdf5
+
+# 编辑器
+.idea/
+.vscode/
+
+# 系统
+Thumbs.db
+.DS_Store

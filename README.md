@@ -13,17 +13,17 @@ An INT8 7-class facial-expression classifier (48×48 grayscale, 117 KB) for ESP3
 
 | 模型 | 大小 | 7 类准确率 | 业务分组准确率 |
 |---|---|---|---|
-| FP32（Keras） | 1.3 MB | 75.03% | — |
-| **INT8（TFLite，发布版）** | **117.7 KB** | **74.77%** | **76.79%** |
+| FP32（Keras） | 1.3 MB | 77.77% | — |
+| **INT8（TFLite，发布版）** | **117.7 KB** | **77.67%** | **79.47%** |
 
-量化损失 0.26 个点。
+量化损失 0.10 个点。
 
 | 业务指标（INT8） | 数值 |
 |---|---|
-| 轻度负向组召回 | 60.53% |
-| 轻度负向 → neutral 泄漏 | 17.98% |
-| neutral → 轻度负向误报 | 14.12% |
-| happy → anger 泄漏 | 1.01% |
+| 轻度负向组召回 | 61.66% |
+| 轻度负向 → neutral 泄漏 | 18.40% |
+| neutral → 轻度负向误报 | 8.68% |
+| happy → anger 泄漏 | 0.93% |
 
 ![INT8 混淆矩阵](docs/confusion_matrix.png)
 
@@ -33,7 +33,7 @@ An INT8 7-class facial-expression classifier (48×48 grayscale, 117 KB) for ESP3
 
 **输入 48×48 单通道灰度。** 选 48×48 是因为上游人脸检测流程原生输出这个尺寸，改分辨率要连固件一起改。试过 96×96，在 ESP32-S3 上更臃肿，精度也没跟着涨。
 
-**结构**：4 个 conv 块（16/32/64/128）+ GlobalAveragePooling + 两层全连接，106,583 参数。没用深度可分离卷积和注意力模块——参数量本来就小，瓶颈在输入分辨率，不在容量。
+**结构**：4 个 conv 块（16/32/64/128）+ 平均池化 + GlobalAveragePooling + 两层全连接，106,583 参数，约 8.3 M MACs。没用深度可分离卷积和注意力模块——参数量本来就小，瓶颈在输入分辨率，不在容量。
 
 **损失**：label smoothing 打底，叠加三条业务约束：
 
@@ -51,7 +51,7 @@ An INT8 7-class facial-expression classifier (48×48 grayscale, 117 KB) for ESP3
 ```bash
 uv sync
 
-uv run python -m emotion.train               # 训练，CPU 约 15 分钟
+uv run python -m emotion.train               # 训练，CPU 约 20 分钟
 uv run python -m emotion.quantize            # INT8 全量化
 uv run python -m emotion.evaluate            # 测试集评估 + 混淆矩阵
 uv run python scripts/export_c_header.py     # 生成 firmware/pupil.h
@@ -109,7 +109,7 @@ const unsigned char emotion_model_quant_tflite[] = { ... };
 
 ## 已知局限
 
-- 48×48 灰度丢细节，少数类召回很低：**fear 23.0%、disgust 17.5%**，happy 则有 91.6%（训练集 fear 281 张、disgust 717 张、happy 4,772 张）。组召回 60.53% 主要被这两类拖累。
+- 48×48 灰度丢细节，少数类召回很低：**fear 29.7%、disgust 25.6%**，happy 则有 91.1%（训练集 fear 281 张、disgust 717 张、happy 4,772 张）。组召回 61.66% 主要被这两类拖累。
 - 训练数据以摆拍为主，强侧光、遮挡、戴眼镜会退化。
 - 7 类输出不等于连续情绪维度，端侧建议按业务做分组决策。
 

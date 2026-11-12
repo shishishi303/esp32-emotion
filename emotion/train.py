@@ -42,28 +42,26 @@ def main(argv=None):
     model = build_model()
     model.summary()
 
+    steps_per_epoch = int(train_ds.cardinality())
+    schedule = keras.optimizers.schedules.CosineDecay(
+        initial_learning_rate=args.lr,
+        decay_steps=max(1, args.epochs * steps_per_epoch),
+        alpha=0.02,
+    )
+
     model.compile(
-        optimizer=keras.optimizers.Adam(learning_rate=args.lr),
+        optimizer=keras.optimizers.Adam(learning_rate=schedule),
         loss=business_aware_loss,
         metrics=["accuracy"],
     )
 
     callbacks = [
-        keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss",
-            factor=0.5,
-            patience=7,
-            min_delta=0.0015,
-            cooldown=2,
-            min_lr=1e-6,
-            verbose=1,
-        ),
         keras.callbacks.EarlyStopping(
             monitor="val_loss",
-            patience=35,
+            patience=28,
             min_delta=0.0015,
             restore_best_weights=True,
-            start_from_epoch=35,
+            start_from_epoch=30,
             verbose=1,
         ),
     ]

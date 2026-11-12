@@ -44,6 +44,7 @@ An INT8 7-class facial-expression classifier (48×48 grayscale, 117 KB) for ESP3
 实现在 `emotion/losses.py`，每个系数的来历都写在注释里。
 
 ## 复现
+训练存在随机性，重跑结果会有 ±1 个点波动；本文数字来自一次具体运行。
 
 需要 [uv](https://docs.astral.sh/uv/)。
 

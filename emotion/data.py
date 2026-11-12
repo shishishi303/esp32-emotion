@@ -29,6 +29,15 @@ from emotion.config import (
 AUTOTUNE = tf.data.AUTOTUNE
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp"}
 
+# 光度增强各分支的触发概率。调参脚本会在构建数据集前覆盖它，
+# 默认值与原始 emotion_final.py 的 v3_preprocessing 完全一致。
+AUG_PROBS = {
+    "brightness": 0.30,
+    "contrast": 0.20,
+    "blur": 0.12,
+    "noise": 0.20,
+}
+
 
 def _geometric_augmentation() -> keras.Sequential:
     """对应原 ImageDataGenerator 里的几何变换。"""
@@ -83,10 +92,10 @@ def photometric_augmentation(image):
         noise = tf.random.normal(tf.shape(x), stddev=tf.sqrt(var))
         return tf.clip_by_value(x + noise, 0.0, 1.0)
 
-    image = _maybe(image, 0.30, brightness)
-    image = _maybe(image, 0.20, contrast)
-    image = _maybe(image, 0.12, blur)
-    image = _maybe(image, 0.20, add_noise)
+    image = _maybe(image, AUG_PROBS["brightness"], brightness)
+    image = _maybe(image, AUG_PROBS["contrast"], contrast)
+    image = _maybe(image, AUG_PROBS["blur"], blur)
+    image = _maybe(image, AUG_PROBS["noise"], add_noise)
     return image
 
 

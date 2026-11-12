@@ -60,7 +60,7 @@ def main(argv=None):
         ),
         keras.callbacks.EarlyStopping(
             monitor="val_loss",
-            patience=22,
+            patience=35,
             min_delta=0.0015,
             restore_best_weights=True,
             start_from_epoch=35,

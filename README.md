@@ -25,7 +25,9 @@ An INT8 7-class facial-expression classifier (48×48 grayscale, 117 KB) for ESP3
 | neutral → 轻度负向误报 | 14.12% |
 | happy → anger 泄漏 | 1.01% |
 
-混淆矩阵 `docs/confusion_matrix.png`，训练曲线 `docs/training_curves.png`。
+![INT8 混淆矩阵](docs/confusion_matrix.png)
+
+训练曲线见 `docs/training_curves.png`。
 
 ## 方法
 

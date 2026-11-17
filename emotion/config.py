@@ -31,6 +31,9 @@ CLASS_NAMES = ["surprise", "fear", "disgust", "happy", "sad", "anger", "neutral"
 
 SURPRISE, FEAR, DISGUST, HAPPY, SAD, ANGER, NEUTRAL = range(7)
 
+# 业务分组：surprise / {fear, disgust, sad} / happy / anger / neutral
+BUSINESS_GROUP = (0, 1, 1, 2, 1, 3, 4)
+
 # 类别权重，缓解样本不平衡（happy 约占训练集 39%，fear 仅 2%）
 CLASS_WEIGHTS = {
     SURPRISE: 1.05,
@@ -43,7 +46,7 @@ CLASS_WEIGHTS = {
 }
 
 # ---- 模型产物 ----
-MODEL_NAME = "pupil"
+MODEL_NAME = "pupil-HighCalculate"
 KERAS_PATH = MODELS_DIR / f"{MODEL_NAME}.keras"
 TFLITE_PATH = MODELS_DIR / f"{MODEL_NAME}.tflite"
 HEADER_PATH = FIRMWARE_DIR / f"{MODEL_NAME}.h"

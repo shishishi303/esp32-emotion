@@ -20,7 +20,8 @@ def plot_training_curves(history, output_path, title: str = "Training") -> Path:
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
     axes[0].plot(epochs, h["accuracy"], label="Train", linewidth=2)
-    axes[0].plot(epochs, h["val_accuracy"], label="Val", linewidth=2)
+    if "val_accuracy" in h:
+        axes[0].plot(epochs, h["val_accuracy"], label="Val", linewidth=2)
     axes[0].set_title("Accuracy")
     axes[0].set_xlabel("Epoch")
     axes[0].set_ylabel("Accuracy")
@@ -28,7 +29,8 @@ def plot_training_curves(history, output_path, title: str = "Training") -> Path:
     axes[0].legend()
 
     axes[1].plot(epochs, h["loss"], label="Train", linewidth=2)
-    axes[1].plot(epochs, h["val_loss"], label="Val", linewidth=2)
+    if "val_loss" in h:
+        axes[1].plot(epochs, h["val_loss"], label="Val", linewidth=2)
     axes[1].set_title("Loss")
     axes[1].set_xlabel("Epoch")
     axes[1].set_ylabel("Loss")
@@ -42,20 +44,19 @@ def plot_training_curves(history, output_path, title: str = "Training") -> Path:
     return output_path
 
 
-def plot_confusion_matrix(y_true, y_pred, class_names, output_path) -> Path:
+def plot_confusion_matrix_counts(
+    cm, class_names, output_path, title="Confusion Matrix (INT8 quantized)"
+) -> Path:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
+    cm = np.asarray(cm, dtype=np.int64)
     n = len(class_names)
-    cm = np.zeros((n, n), dtype=np.int64)
-    for t, p in zip(y_true, y_pred):
-        cm[int(t), int(p)] += 1
 
     fig, ax = plt.subplots(figsize=(8, 7))
     im = ax.imshow(cm, interpolation="nearest", cmap="Blues")
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    ax.set_title("Confusion Matrix (INT8 quantized)")
+    ax.set_title(title)
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
     ax.set_xticks(np.arange(n))
@@ -73,3 +74,13 @@ def plot_confusion_matrix(y_true, y_pred, class_names, output_path) -> Path:
     fig.savefig(output_path, dpi=170)
     plt.close(fig)
     return output_path
+
+
+def plot_confusion_matrix(
+    y_true, y_pred, class_names, output_path, title="Confusion Matrix (INT8 quantized)"
+) -> Path:
+    n = len(class_names)
+    cm = np.zeros((n, n), dtype=np.int64)
+    for t, p in zip(y_true, y_pred):
+        cm[int(t), int(p)] += 1
+    return plot_confusion_matrix_counts(cm, class_names, output_path, title)

@@ -7,8 +7,8 @@
     几何：旋转 ±10°、平移 5%、缩放 10%、水平翻转、fill_mode=nearest
     光度：亮度、对比度、高斯模糊、噪点（各自带触发概率）
 
-验证集从 `data/train` 里切出 15%，`data/test` 只在最终评估时使用一次。
-原先 train/test 混用会导致测试集参与早停与量化校准，评估结果偏乐观。
+调参时从 `data/train` 里切出 15% 验证集；最终可按固定轮数使用全部训练图。
+`data/test` 只在最终评估时使用，不能参与训练、早停或量化校准。
 """
 
 from pathlib import Path
@@ -138,6 +138,13 @@ def _assert_class_order(ds):
         raise ValueError(f"data/train 的类别子目录顺序是 {found}，期望 {expected}")
 
 
+def _read_grayscale(path, label):
+    image = tf.io.read_file(path)
+    image = tf.image.decode_image(image, channels=1, expand_animations=False)
+    image = tf.image.resize(image, IMG_SIZE, method="nearest")
+    return image, label
+
+
 def load_datasets(data_dir=DATA_DIR, batch_size=BATCH_SIZE, seed=SEED):
     """返回 (train_ds, val_ds, test_ds)。只有 train_ds 带数据增强。"""
     data_dir = Path(data_dir)
@@ -149,14 +156,32 @@ def load_datasets(data_dir=DATA_DIR, batch_size=BATCH_SIZE, seed=SEED):
 
     train_raw = _raw_dataset(train_dir, batch_size, True, seed, subset="training")
     _assert_class_order(train_raw)
-    val_raw = _raw_dataset(train_dir, batch_size, True, seed, subset="validation")
+    val_ds = load_validation_dataset(data_dir=data_dir, batch_size=batch_size, seed=seed)
     test_raw = _raw_dataset(test_dir, batch_size, False)
 
     return (
         _prepared(train_raw, augment=True),
-        _prepared(val_raw, augment=False),
+        val_ds,
         _prepared(test_raw, augment=False),
     )
+
+
+def load_full_training_dataset(data_dir=DATA_DIR, batch_size=BATCH_SIZE, seed=SEED):
+    train_raw = _raw_dataset(Path(data_dir) / "train", batch_size, True, seed)
+    _assert_class_order(train_raw)
+    return _prepared(train_raw, augment=True)
+
+
+def load_validation_dataset(data_dir=DATA_DIR, batch_size=BATCH_SIZE, seed=SEED):
+    train_dir = Path(data_dir) / "train"
+    val_raw = _raw_dataset(train_dir, 1, True, seed, subset="validation")
+    _assert_class_order(val_raw)
+    paths = sorted(val_raw.file_paths)
+    labels = [int(Path(path).parent.name) for path in paths]
+    dataset = tf.data.Dataset.from_tensor_slices((paths, labels))
+    dataset = dataset.map(_read_grayscale, num_parallel_calls=AUTOTUNE)
+    dataset = dataset.batch(batch_size)
+    return _prepared(dataset, augment=False)
 
 
 def load_test_dataset(data_dir=DATA_DIR, batch_size=BATCH_SIZE):
@@ -165,14 +190,20 @@ def load_test_dataset(data_dir=DATA_DIR, batch_size=BATCH_SIZE):
 
 
 def load_calibration_paths(data_dir=DATA_DIR, per_class: int = 150, seed: int = SEED):
-    """量化校准样本：每类等量抽样，来源是训练集（不是测试集）。"""
+    """量化校准样本：每类等量抽样，只使用 training 子划分。"""
     train_dir = Path(data_dir) / "train"
+    train_raw = _raw_dataset(train_dir, 1, True, seed, subset="training")
+    training_paths = {Path(path).resolve() for path in train_raw.file_paths}
     rng = np.random.default_rng(seed)
     paths = []
 
     for idx in range(len(CLASS_NAMES)):
         class_dir = train_dir / str(idx)
-        files = sorted(p for p in class_dir.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+        files = sorted(
+            p
+            for p in class_dir.iterdir()
+            if p.suffix.lower() in IMAGE_SUFFIXES and p.resolve() in training_paths
+        )
         if not files:
             raise FileNotFoundError(f"类别 {idx} 没有图片: {class_dir}")
         take = min(per_class, len(files))

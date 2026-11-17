@@ -1,0 +1,78 @@
+{
+  "samples": 3068,
+  "accuracy": 0.7943285528031291,
+  "macro_recall": 0.6686617914316901,
+  "per_class_recall": {
+    "surprise": 0.7598784194528876,
+    "fear": 0.3918918918918919,
+    "disgust": 0.3625,
+    "happy": 0.9257383966244725,
+    "sad": 0.6778242677824268,
+    "anger": 0.7407407407407407,
+    "neutral": 0.8220588235294117
+  },
+  "business_accuracy": 0.8116036505867015,
+  "business_macro_recall": 0.7800203547211879,
+  "business_per_group_recall": {
+    "surprise": 0.7598784194528876,
+    "mild_negative": 0.651685393258427,
+    "happy": 0.9257383966244725,
+    "anger": 0.7407407407407407,
+    "neutral": 0.8220588235294117
+  },
+  "business_per_group_precision": {
+    "surprise": 0.7987220447284346,
+    "mild_negative": 0.8197879858657244,
+    "happy": 0.8940505297473512,
+    "anger": 0.6779661016949152,
+    "neutral": 0.7121019108280254
+  },
+  "business_confusion_matrix": [
+    [
+      250,
+      14,
+      17,
+      8,
+      40
+    ],
+    [
+      20,
+      464,
+      64,
+      37,
+      127
+    ],
+    [
+      7,
+      22,
+      1097,
+      8,
+      51
+    ],
+    [
+      4,
+      16,
+      14,
+      120,
+      8
+    ],
+    [
+      32,
+      50,
+      35,
+      4,
+      559
+    ]
+  ],
+  "mild_recall": 0.651685393258427,
+  "mild_precision": 0.8197879858657244,
+  "mild_f1": 0.7261345852895149,
+  "mild_to_surprise": 0.028089887640449437,
+  "mild_to_happy": 0.0898876404494382,
+  "mild_to_anger": 0.05196629213483146,
+  "mild_to_neutral": 0.17837078651685392,
+  "happy_to_anger": 0.006751054852320675,
+  "neutral_to_mild": 0.07352941176470588,
+  "model": "D:\\project-python\\emotion-esp32\\models\\pupil-HighCalculate.tflite",
+  "split": "test"
+}

@@ -13,7 +13,16 @@
 import tensorflow as tf
 from tensorflow import keras
 
-from emotion.config import ANGER, DISGUST, FEAR, HAPPY, NEUTRAL, SAD, SURPRISE
+from emotion.config import (
+    ANGER,
+    BUSINESS_GROUP,
+    DISGUST,
+    FEAR,
+    HAPPY,
+    NEUTRAL,
+    SAD,
+    SURPRISE,
+)
 
 # 轻度负向三类：允许互相混淆
 MILD_NEGATIVE = (FEAR, DISGUST, SAD)
@@ -25,7 +34,20 @@ GROUP_KEEP = 0.80
 GROUP_SHARE = 0.09
 
 
-def business_aware_loss(y_true, y_pred):
+def business_aware_loss(
+    y_true,
+    y_pred,
+    group_keep=GROUP_KEEP,
+    group_share=GROUP_SHARE,
+    outside_mild_penalty=0.0,
+    happy_anger_penalty=0.35,
+    happy_anger_power=1.0,
+    mild_neutral_penalty=0.18,
+    neutral_mild_penalty=0.0,
+    happy_anger_margin_weight=0.0,
+    neutral_mild_margin_weight=0.0,
+    pairwise_margin=0.05,
+):
     """y_true: (batch,) 整数标签；y_pred: (batch, 7) softmax 概率。"""
     y_true = tf.cast(tf.reshape(y_true, [-1]), tf.int32)
     num_classes = tf.shape(y_pred)[-1]
@@ -43,8 +65,8 @@ def business_aware_loss(y_true, y_pred):
     in_soft = tf.gather(soft_lookup, y_true)
     peers = tf.maximum(soft_mask - onehot, 0.0)
     group_target = (
-        onehot * tf.cast(GROUP_KEEP, y_pred.dtype)
-        + peers * tf.cast(GROUP_SHARE, y_pred.dtype)
+        onehot * tf.cast(group_keep, y_pred.dtype)
+        + peers * tf.cast(group_share, y_pred.dtype)
         + smooth / num_classes_f
     )
 
@@ -62,13 +84,14 @@ def business_aware_loss(y_true, y_pred):
 
     penalty = (
         # happy 被判成 anger：最严重
-        0.35 * masked(is_happy, y_pred[:, ANGER])
+        tf.cast(happy_anger_penalty, y_pred.dtype)
+        * masked(is_happy, tf.pow(y_pred[:, ANGER], tf.cast(happy_anger_power, y_pred.dtype)))
         # happy 被判成 sad / neutral
         + 0.18 * masked(is_happy, y_pred[:, SAD] + y_pred[:, NEUTRAL])
         # anger 被判成 happy
         + 0.12 * masked(is_anger, y_pred[:, HAPPY])
         # 轻度负向被判成 neutral / happy / anger / surprise
-        + 0.18 * masked(in_soft, y_pred[:, NEUTRAL])
+        + tf.cast(mild_neutral_penalty, y_pred.dtype) * masked(in_soft, y_pred[:, NEUTRAL])
         + 0.10 * masked(in_soft, y_pred[:, HAPPY])
         + 0.08 * masked(in_soft, y_pred[:, ANGER])
         + 0.04 * masked(in_soft, y_pred[:, SURPRISE])
@@ -82,4 +105,127 @@ def business_aware_loss(y_true, y_pred):
         )
     )
 
+    mild_probability = tf.reduce_sum(tf.gather(y_pred, MILD_NEGATIVE, axis=1), axis=1)
+    penalty = penalty + tf.cast(outside_mild_penalty, y_pred.dtype) * masked(
+        tf.logical_not(in_soft), mild_probability
+    )
+    penalty = penalty + tf.cast(neutral_mild_penalty, y_pred.dtype) * masked(
+        is_neutral, mild_probability
+    )
+    margin = tf.cast(pairwise_margin, y_pred.dtype)
+    happy_anger_margin = tf.nn.relu(
+        tf.math.log(tf.clip_by_value(y_pred[:, ANGER], 1e-7, 1.0))
+        - tf.math.log(tf.clip_by_value(y_pred[:, HAPPY], 1e-7, 1.0))
+        + margin
+    )
+    neutral_mild_margin = tf.nn.relu(
+        tf.math.log(tf.clip_by_value(mild_probability, 1e-7, 1.0))
+        - tf.math.log(tf.clip_by_value(y_pred[:, NEUTRAL], 1e-7, 1.0))
+        + margin
+    )
+    penalty = penalty + tf.cast(happy_anger_margin_weight, y_pred.dtype) * masked(
+        is_happy, happy_anger_margin
+    )
+    penalty = penalty + tf.cast(neutral_mild_margin_weight, y_pred.dtype) * masked(
+        is_neutral, neutral_mild_margin
+    )
     return base_loss + penalty
+
+
+def distillation_loss(
+    y_true,
+    y_pred,
+    teacher_probs,
+    temperature=2.0,
+    distill_weight=0.5,
+    group_weight=0.2,
+    outside_mild_penalty=0.04,
+    business_probs=None,
+):
+    y_true = tf.cast(tf.reshape(y_true, [-1]), tf.int32)
+    temperature = tf.cast(temperature, y_pred.dtype)
+    eps = tf.cast(1e-7, y_pred.dtype)
+
+    teacher_soft = tf.nn.softmax(tf.math.log(tf.clip_by_value(teacher_probs, eps, 1.0)) / temperature)
+    student_soft = tf.nn.softmax(tf.math.log(tf.clip_by_value(y_pred, eps, 1.0)) / temperature)
+    kd = tf.reduce_sum(
+        teacher_soft * (tf.math.log(teacher_soft + eps) - tf.math.log(student_soft + eps)),
+        axis=1,
+    ) * tf.square(temperature)
+
+    if business_probs is None:
+        group_matrix = tf.one_hot(BUSINESS_GROUP, 5, dtype=y_pred.dtype)
+        student_groups = tf.linalg.matmul(y_pred, group_matrix)
+    else:
+        student_groups = business_probs
+    true_groups = tf.gather(BUSINESS_GROUP, y_true)
+    group_loss = keras.losses.sparse_categorical_crossentropy(true_groups, student_groups)
+
+    hard = business_aware_loss(
+        y_true,
+        y_pred,
+        outside_mild_penalty=outside_mild_penalty,
+    )
+    distill_weight = tf.cast(distill_weight, y_pred.dtype)
+    group_weight = tf.cast(group_weight, y_pred.dtype)
+    return (1.0 - distill_weight) * hard + distill_weight * kd + group_weight * group_loss
+
+
+@keras.utils.register_keras_serializable(package="emotion")
+class BusinessAwareLoss(keras.losses.Loss):
+    def __init__(
+        self,
+        group_keep=GROUP_KEEP,
+        group_share=GROUP_SHARE,
+        outside_mild_penalty=0.0,
+        happy_anger_penalty=0.35,
+        happy_anger_power=1.0,
+        mild_neutral_penalty=0.18,
+        neutral_mild_penalty=0.0,
+        happy_anger_margin_weight=0.0,
+        neutral_mild_margin_weight=0.0,
+        pairwise_margin=0.05,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.group_keep = float(group_keep)
+        self.group_share = float(group_share)
+        self.outside_mild_penalty = float(outside_mild_penalty)
+        self.happy_anger_penalty = float(happy_anger_penalty)
+        self.happy_anger_power = float(happy_anger_power)
+        self.mild_neutral_penalty = float(mild_neutral_penalty)
+        self.neutral_mild_penalty = float(neutral_mild_penalty)
+        self.happy_anger_margin_weight = float(happy_anger_margin_weight)
+        self.neutral_mild_margin_weight = float(neutral_mild_margin_weight)
+        self.pairwise_margin = float(pairwise_margin)
+
+    def call(self, y_true, y_pred):
+        return business_aware_loss(
+            y_true,
+            y_pred,
+            group_keep=self.group_keep,
+            group_share=self.group_share,
+            outside_mild_penalty=self.outside_mild_penalty,
+            happy_anger_penalty=self.happy_anger_penalty,
+            happy_anger_power=self.happy_anger_power,
+            mild_neutral_penalty=self.mild_neutral_penalty,
+            neutral_mild_penalty=self.neutral_mild_penalty,
+            happy_anger_margin_weight=self.happy_anger_margin_weight,
+            neutral_mild_margin_weight=self.neutral_mild_margin_weight,
+            pairwise_margin=self.pairwise_margin,
+        )
+
+    def get_config(self):
+        return {
+            **super().get_config(),
+            "group_keep": self.group_keep,
+            "group_share": self.group_share,
+            "outside_mild_penalty": self.outside_mild_penalty,
+            "happy_anger_penalty": self.happy_anger_penalty,
+            "happy_anger_power": self.happy_anger_power,
+            "mild_neutral_penalty": self.mild_neutral_penalty,
+            "neutral_mild_penalty": self.neutral_mild_penalty,
+            "happy_anger_margin_weight": self.happy_anger_margin_weight,
+            "neutral_mild_margin_weight": self.neutral_mild_margin_weight,
+            "pairwise_margin": self.pairwise_margin,
+        }

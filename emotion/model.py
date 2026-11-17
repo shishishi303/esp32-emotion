@@ -3,9 +3,12 @@
 默认配置（16/32/64/128）参数量 106,583，约 8.3 M MACs，
 INT8 量化后约 118 KB，适配 ESP32-S3 的内存与算力预算。
 
-两个开关都是**零额外算力**的变体，只改变同样计算量下的组织方式：
+可选变体：
   pooling   —— max / avg 池化互换（池化不计 MACs）
   dual_pool —— GAP + GMP 拼接后接分类头（多一次 max 归约，可忽略）
+  se_ratio  —— 最后卷积后的轻量 SE 通道注意力压缩比
+  fpn       —— 融合中高层多尺度特征
+  business_head —— 训练期增加五组辅助分类头，导出时移除
 """
 
 from tensorflow import keras
@@ -38,6 +41,9 @@ def build_model(
     head_units: int = 64,
     pooling: str = "avg",
     dual_pool: bool = False,
+    se_ratio: int | None = None,
+    fpn: bool = False,
+    business_head: bool = False,
 ) -> keras.Model:
     c1, c2, c3, c4 = channels
 
@@ -45,11 +51,37 @@ def build_model(
 
     x = conv_block(inputs, c1, pooling=pooling)
     x = conv_block(x, c2, pooling=pooling)
+    mid_block = x
     x = conv_block(x, c3, pooling=pooling)
+    last_block = x
 
     x = layers.Conv2D(c4, (3, 3), padding="same", use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.ReLU(max_value=6.0)(x)
+
+    if fpn:
+        mid_projection = layers.AveragePooling2D((2, 2))(mid_block)
+        mid_projection = layers.Conv2D(64, (1, 1), padding="same", use_bias=False, name="fpn_mid_conv")(mid_projection)
+        mid_projection = layers.BatchNormalization(name="fpn_mid_bn")(mid_projection)
+        mid_projection = layers.ReLU(max_value=6.0)(mid_projection)
+
+        last_projection = layers.Conv2D(64, (1, 1), padding="same", use_bias=False, name="fpn_last_conv")(last_block)
+        last_projection = layers.BatchNormalization(name="fpn_last_bn")(last_projection)
+        last_projection = layers.ReLU(max_value=6.0)(last_projection)
+
+        high_projection = layers.Conv2D(64, (1, 1), padding="same", use_bias=False, name="fpn_high_conv")(x)
+        high_projection = layers.BatchNormalization(name="fpn_high_bn")(high_projection)
+        high_projection = layers.ReLU(max_value=6.0)(high_projection)
+        x = layers.Concatenate()([mid_projection, last_projection, high_projection])
+
+    if se_ratio is not None:
+        if not 1 <= se_ratio <= c4:
+            raise ValueError(f"se_ratio 必须在 1 到 {c4} 之间")
+        scale = layers.GlobalAveragePooling2D()(x)
+        scale = layers.Dense(c4 // se_ratio, activation="relu")(scale)
+        scale = layers.Dense(c4, activation="sigmoid")(scale)
+        scale = layers.Reshape((1, 1, c4))(scale)
+        x = layers.Multiply()([x, scale])
 
     pooled = layers.GlobalAveragePooling2D()(x)
     if dual_pool:
@@ -61,4 +93,7 @@ def build_model(
     pooled = layers.Dropout(dropout_fc)(pooled)
 
     outputs = layers.Dense(num_classes, activation="softmax", name="probs")(pooled)
+    if business_head:
+        group_outputs = layers.Dense(5, activation="softmax", name="business_probs")(pooled)
+        return keras.Model(inputs, [outputs, group_outputs], name=name)
     return keras.Model(inputs, outputs, name=name)
